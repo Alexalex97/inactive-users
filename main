@@ -1,0 +1,54 @@
+//https://insidetattoo.ro/wp-admin/admin-post.php?action=export_active_customers
+
+add_action('admin_post_export_active_customers', 'export_active_customers_csv');
+add_action('admin_post_nopriv_export_active_customers', 'export_active_customers_csv');
+
+function export_active_customers_csv() {
+
+  
+    if (!is_user_logged_in() || !current_user_can('manage_woocommerce')) {
+        wp_die('Unauthorized');
+    }
+
+    global $wpdb;
+
+    $date_limit = date('Y-m-d H:i:s', strtotime('-3 months'));
+
+    $results = $wpdb->get_results($wpdb->prepare("
+        SELECT 
+            pm.meta_value as user_id,
+            MAX(p.post_date) as last_order_date
+        FROM {$wpdb->posts} p
+        JOIN {$wpdb->postmeta} pm 
+            ON p.ID = pm.post_id
+        WHERE p.post_type = 'shop_order'
+          AND p.post_status IN ('wc-completed', 'wc-processing')
+          AND pm.meta_key = '_customer_user'
+          AND p.post_date >= %s
+        GROUP BY pm.meta_value
+    ", $date_limit));
+
+    header('Content-Type: text/csv');
+    header('Content-Disposition: attachment;filename=active_customers_last_3_months.csv');
+
+    $output = fopen('php://output', 'w');
+
+    fputcsv($output, ['User ID', 'Email', 'First Name', 'Last Name', 'Last Order Date']);
+
+    foreach ($results as $row) {
+        $user = get_user_by('id', $row->user_id);
+
+        if (!$user) continue;
+
+        fputcsv($output, [
+            $user->ID,
+            $user->user_email,
+            get_user_meta($user->ID, 'first_name', true),
+            get_user_meta($user->ID, 'last_name', true),
+            $row->last_order_date
+        ]);
+    }
+
+    fclose($output);
+    exit;
+}
